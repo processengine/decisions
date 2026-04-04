@@ -1,5 +1,11 @@
 # @processengine/decisions
 
+[![npm version](https://img.shields.io/npm/v/%40processengine%2Fdecisions)](https://www.npmjs.com/package/@processengine/decisions)
+[![CI](https://github.com/processengine/decisions/actions/workflows/ci.yml/badge.svg)](https://github.com/processengine/decisions/actions/workflows/ci.yml)
+[![publish](https://github.com/processengine/decisions/actions/workflows/publish.yml/badge.svg)](https://github.com/processengine/decisions/actions/workflows/publish.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
+[![node >= 18](https://img.shields.io/badge/node-%3E%3D18-339933)](https://nodejs.org/)
+
 Compile-first library for selecting a decision from JSON-safe facts.
 
 ## What it does
