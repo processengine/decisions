@@ -1,16 +1,28 @@
 # Changelog
 
-## 1.0.0 - 2026-04-04
+## [2.0.0] - 2026-05-17
 
-First public release of `@processengine/decisions`.
+### Changed
+- Reworked package into Flow 5 decisions v2 runtime.
+- Replaced old `compile/evaluate/run` contract with `validateDecisions/prepareDecisions/executeDecisions`.
+- Replaced v1 artifact collection model with a single decision set source using `cases` and `default`.
+- Replaced `then.decision` with canonical `then.outcome`.
+- Runtime result is now `{ output: { outcome, decisionSetId, matchedCaseId?, ... }, trace? }`.
 
-- full rename from historical `jsondecisions`
-- compile-first public contract
-- immutable compiled artifact
-- structured compile diagnostics and runtime errors
-- strict DSL with schema and unknown-field rejection
-- hostile-input protections for dangerous keys, cycles, and non-JSON-safe values
-- stable trace contract
-- contract, determinism, and hostile-input tests
+### Added
+- Condition operators: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `in`, `notIn`, `exists`, `missing`, and fact-to-fact comparisons.
+- JSON-safe / transport-safe output and trace checks.
+- Flow 5 interop docs and examples.
+- Pack/install smoke test.
 
-- compile(definition) now requires the normative wrapper object `{ artifacts: [...] }`
+### Removed
+- v1 `definition.artifacts` model.
+- v1 `decision-rule` / `decision-set` artifact types.
+- v1 `defaultDecision`, `patchPlanFrom`, `patchPlan`, `requiredFacts`, `missingFactPolicy`, `strict` model and the rejected interim `rules` source field.
+
+### Hardening after review
+- Trace option is now the strict family enum `off | basic | verbose`; invalid values throw `DECISIONS_TRACE_MODE_INVALID`.
+- Runtime rejects malformed prepared artifacts with `DECISIONS_PREPARED_ARTIFACT_INVALID`.
+- Validator rejects duplicate case ids and non-object metadata.
+- Scalar condition operators reject object/array facts with `DECISIONS_CONDITION_TYPE_MISMATCH`.
+- Added production-ready runtime boundary gate: malformed options, facts, prepared artifacts and trace paths throw typed `DecisionsRuntimeError`, with no raw JavaScript errors escaping public runtime API.

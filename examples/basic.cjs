@@ -1,25 +1,38 @@
-const { compile, evaluate } = require('../index');
+'use strict';
 
-const definition = {
-  artifacts: [
+const { validateDecisions, prepareDecisions, executeDecisions } = require('../index');
+
+const source = {
+  decisionSetId: 'decisions.validation.route',
+  version: '2.0.0',
+  title: 'Выбрать маршрут после валидации заявки',
+  description: 'Определяет, можно ли продолжать обработку заявки или нужно завершить процесс отказом.',
+  cases: [
     {
-      id: 'route.main.low',
-      type: 'decision-rule',
-      description: 'low risk',
-      when: { 'risk.level': 'low' },
-      then: { decision: 'APPROVE', reason: 'low risk' }
+      id: 'validation.has_errors',
+      title: 'Есть блокирующие ошибки',
+      description: 'Отклоняет заявку, если проверки вернули хотя бы одну ошибку.',
+      when: { errorCount: { gt: 0 } },
+      then: { outcome: 'REJECT_VALIDATION', reason: 'VALIDATION_ERROR' }
     },
     {
-      id: 'route.main',
-      type: 'decision-set',
-      description: 'main route',
-      version: '1.0.0',
-      mode: 'first_match_wins',
-      rules: ['route.main.low'],
-      defaultDecision: { decision: 'REVIEW', reason: 'fallback' }
+      id: 'validation.only_soft_warnings',
+      title: 'Есть только мягкие предупреждения',
+      description: 'Разрешает продолжить процесс, если все предупреждения относятся к мягким контактным полям.',
+      when: {
+        warningCount: { gt: 0 },
+        softContactWarningCount: { eqFact: 'warningCount' },
+        errorCount: 0
+      },
+      then: { outcome: 'CONTINUE', reason: 'SOFT_WARNINGS_ONLY' }
     }
-  ]
+  ],
+  default: { outcome: 'CONTINUE', reason: 'VALIDATION_OK' }
 };
 
-const compiled = compile(definition);
-console.log(evaluate(compiled, 'route.main', { risk: { level: 'low' } }));
+const validation = validateDecisions(source);
+if (!validation.ok) throw new Error(JSON.stringify(validation.diagnostics, null, 2));
+
+const artifact = prepareDecisions(source);
+const result = executeDecisions(artifact, { errorCount: 0, warningCount: 2, softContactWarningCount: 2 }, { trace: 'basic' });
+console.log(JSON.stringify(result, null, 2));

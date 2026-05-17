@@ -1,33 +1,58 @@
-# Compatibility policy
+# Compatibility
 
-## Public API
+## Runtime
 
-The public API consists of:
+`@processengine/decisions` v2 requires Node.js `>=20.19.0`.
 
-- `compile(definition)`
-- `evaluate(compiled, entrypointId, facts, options?)`
-- `run(definition, entrypointId, facts, options?)`
-- `CompilationError`
-- exported TypeScript types
-- schema subpath `@processengine/decisions/schema`
+## API compatibility
 
-## Breaking changes
+The canonical v2 API is:
 
-The following require a major version bump:
+```text
+validateDecisions
+prepareDecisions
+executeDecisions
+formatDecisionsDiagnostics
+formatDecisionsRuntimeError
+```
 
-- shape of `DecisionResult`
-- runtime error codes or phases
-- compile diagnostic shape or codes
-- trace shape or ordering
-- compile-first contract
-- semantics of `first_match_wins`
-- exported TypeScript API
-- schema shape and field semantics
+The v1 `compile/evaluate/run` API is not part of the v2 canonical contract.
 
-## Internal implementation
+## Source compatibility
 
-The internal file layout, helper names, and algorithmic details are not public API.
+v2 source artifacts use:
 
-## Notes on compilation errors
+```text
+decisionSetId
+version
+title
+description
+cases
+default
+```
 
-When `compile()` throws `CompilationError`, `error.diagnostics` contains the full collected diagnostics, including warnings accumulated before the throwing error set was finalized.
+v1 `definition.artifacts`, `decision-rule`, `decision-set`, `defaultDecision`, `patchPlanFrom`, `then.decision` and the rejected interim `rules` field are incompatible with v2.
+
+## Prepared artifact compatibility
+
+Prepared artifacts are runtime-ready and immutable by public contract. Consumers must not manually construct them or depend on internal compiled case shape.
+
+## Runtime result compatibility
+
+`ExecuteDecisionsResult` is JSON-safe / transport-safe and has canonical shape:
+
+```ts
+{ output: { outcome, decisionSetId, matchedCaseId?, reason?, metadata?, tags? }, trace? }
+```
+
+This result can be passed through `@processengine/dataflows` without host-side cleanup.
+
+## Trace compatibility
+
+Trace is optional and disabled by default. When returned, it is JSON-safe / transport-safe. Trace shape is public, but additional JSON-safe `details` fields may be added in minor releases.
+
+`executeDecisions` supports only `trace?: 'off' | 'basic' | 'verbose'`. Boolean aliases such as `false` are not supported and are rejected with `DECISIONS_TRACE_MODE_INVALID`.
+
+## Runtime boundary compatibility
+
+Public runtime failures are surfaced as typed `DecisionsRuntimeError` instances with stable machine-readable codes. Malformed prepared artifacts, malformed facts, invalid runtime options and trace serialization failures must not leak raw `TypeError`, `RangeError`, `SyntaxError` or other built-in JavaScript errors from the public API.

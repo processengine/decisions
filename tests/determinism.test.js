@@ -1,35 +1,26 @@
 'use strict';
-
-const test = require('node:test');
+const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { compile, evaluate } = require('../index');
-const { makeDefinition } = require('./helpers');
+const { prepareDecisions, executeDecisions } = require('../index');
+const { validSource } = require('./helpers');
 
-test('same compiled artifact and same facts give same result', () => {
-  const compiled = compile(makeDefinition());
-  const facts = { request: { risk: 'low', channel: 'web' } };
-  assert.deepEqual(evaluate(compiled, 'route.main', facts), evaluate(compiled, 'route.main', facts));
+test('same prepared artifact and same facts choose same outcome', () => {
+  const artifact = prepareDecisions(validSource);
+  const facts = { ownServiceClientCount: 0, clientMatchCount: 3 };
+  assert.deepEqual(executeDecisions(artifact, facts), executeDecisions(artifact, facts));
 });
 
-test('trace true and trace false choose the same decision', () => {
-  const compiled = compile(makeDefinition());
-  const facts = { request: { risk: 'low', channel: 'web' } };
-  const withTrace = evaluate(compiled, 'route.main', facts, { trace: true });
-  const withoutTrace = evaluate(compiled, 'route.main', facts, { trace: false });
-  assert.equal(withTrace.status, withoutTrace.status);
-  assert.equal(withTrace.decision, withoutTrace.decision);
-  assert.equal(withTrace.reason, withoutTrace.reason);
+test('trace mode does not change selected outcome', () => {
+  const artifact = prepareDecisions(validSource);
+  const facts = { ownServiceClientCount: 0, clientMatchCount: 3 };
+  assert.equal(executeDecisions(artifact, facts).output.outcome, executeDecisions(artifact, facts, { trace: 'basic' }).output.outcome);
 });
 
-test('rule order is the only tie breaker', () => {
-  const definition = {
-    artifacts: [
-      { id: 'set.r1', type: 'decision-rule', description: 'r1', when: { a: 1 }, then: { decision: 'ONE', reason: 'one' } },
-      { id: 'set.r2', type: 'decision-rule', description: 'r2', when: { a: 1 }, then: { decision: 'TWO', reason: 'two' } },
-      { id: 'set', type: 'decision-set', description: 'set', version: '1', mode: 'first_match_wins', rules: ['set.r1', 'set.r2'], defaultDecision: { decision: 'D', reason: 'd' } }
-    ]
-  };
-  const compiled = compile(definition);
-  const result = evaluate(compiled, 'set', { a: 1 });
-  assert.equal(result.decision, 'ONE');
+test('case order is the only tie breaker', () => {
+  const source = { ...validSource, cases: [
+    { id: 'first', title: 'first', description: 'first', when: { a: 1 }, then: { outcome: 'FIRST' } },
+    { id: 'second', title: 'second', description: 'second', when: { a: 1 }, then: { outcome: 'SECOND' } },
+  ] };
+  const result = executeDecisions(prepareDecisions(source), { a: 1 });
+  assert.equal(result.output.outcome, 'FIRST');
 });

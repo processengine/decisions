@@ -1,47 +1,36 @@
 'use strict';
 
-function freeze(value) {
-  return Object.freeze(value);
-}
-
-function makeDiagnostic({ severity, code, message, phase, path = null, artifactId = null, entrypointId = null, ruleId = null, conditionIndex = null, details = null }) {
-  return freeze({ severity, code, message, phase, path, artifactId, entrypointId, ruleId, conditionIndex, details });
-}
-
-function formatDiagnostic(diagnostic) {
-  const parts = [
-    '[' + diagnostic.severity.toUpperCase() + ']',
-    '[' + diagnostic.code + ']',
-    diagnostic.phase,
-  ];
-  if (diagnostic.artifactId) parts.push(diagnostic.artifactId);
-  if (diagnostic.path) parts.push('(' + diagnostic.path + ')');
-  return parts.join(' ') + ': ' + diagnostic.message;
-}
-
-class CompilationError extends Error {
-  constructor(diagnostics) {
-    const list = diagnostics.map((d, i) => '  ' + (i + 1) + '. ' + formatDiagnostic(d)).join('\n');
-    super('@processengine/decisions compilation failed:\n' + list);
-    this.name = 'CompilationError';
-    this.diagnostics = freeze([...diagnostics]);
-    this.errors = freeze(diagnostics.filter((d) => d.severity === 'error'));
-    this.warnings = freeze(diagnostics.filter((d) => d.severity === 'warning'));
+class DecisionsCompileError extends Error {
+  constructor(diagnostics, message) {
+    const lines = (diagnostics ?? [])
+      .map((d, i) => `  ${i + 1}. [${(d.level ?? 'error').toUpperCase()}] ${d.code} — ${d.message}`)
+      .join('\n');
+    super(message ?? `Decisions compilation failed with ${(diagnostics ?? []).length} diagnostic(s).${lines ? '\n' + lines : ''}`);
+    this.name = 'DecisionsCompileError';
+    this.code = 'DECISIONS_COMPILE_ERROR';
+    this.diagnostics = Object.freeze((diagnostics ?? []).map(d => Object.freeze({ ...d })));
   }
 }
 
-function makeRuntimeError({ code, message, phase, entrypointId = null, ruleId = null, conditionIndex = null, details = null }) {
-  return freeze({ code, message, phase, entrypointId, ruleId, conditionIndex, details });
+class DecisionsRuntimeError extends Error {
+  constructor({ code = 'DECISIONS_RUNTIME_ERROR', message = 'Decisions execution failed', details, cause } = {}) {
+    super(message, { cause });
+    this.name = 'DecisionsRuntimeError';
+    this.code = code;
+    this.details = details ?? null;
+    this.cause = cause ?? null;
+  }
 }
 
-function formatRuntimeError(error) {
-  return '[' + error.code + '] ' + error.phase + ': ' + error.message;
+function makeDiagnostic({ code, level = 'error', message, path, details }) {
+  const d = { code, level, message };
+  if (path != null) d.path = path;
+  if (details != null) d.details = details;
+  return Object.freeze(d);
 }
 
-module.exports = {
-  makeDiagnostic,
-  CompilationError,
-  makeRuntimeError,
-  formatDiagnostic,
-  formatRuntimeError,
-};
+function hasErrors(diagnostics) {
+  return diagnostics.some(d => d.level === 'error');
+}
+
+module.exports = { DecisionsCompileError, DecisionsRuntimeError, makeDiagnostic, hasErrors };

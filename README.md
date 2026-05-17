@@ -1,26 +1,16 @@
 # @processengine/decisions
 
-[![npm version](https://img.shields.io/npm/v/%40processengine%2Fdecisions)](https://www.npmjs.com/package/@processengine/decisions)
-[![CI](https://github.com/processengine/decisions/actions/workflows/ci.yml/badge.svg)](https://github.com/processengine/decisions/actions/workflows/ci.yml)
-[![publish](https://github.com/processengine/decisions/actions/workflows/publish.yml/badge.svg)](https://github.com/processengine/decisions/actions/workflows/publish.yml)
-[![license: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
-[![node >= 18](https://img.shields.io/badge/node-%3E%3D18-339933)](https://nodejs.org/)
+Flow 5 decision runtime for selecting an `outcome` from already prepared JSON-safe facts.
 
-Compile-first library for selecting a decision from JSON-safe facts.
+## Role
 
-## What it does
+```text
+facts object -> decision output
+```
 
-- compiles decision definitions into an immutable artifact
-- evaluates facts only against that compiled artifact
-- returns a stable result shape: `MATCHED`, `DEFAULTED`, or `ABORT`
-- keeps a strict architectural boundary: this package selects a decision and stops there
+`@processengine/decisions` does one job: it evaluates ordered business decision cases against a facts object and returns a transport-safe runtime result.
 
-## What it does not do
-
-- does not execute actions
-- does not orchestrate time, retries, queues, or external calls
-- does not replace `@processengine/flows`
-- does not support expressions, nested decisions, or side effects in v1
+It does not read `ProcessState`, traverse raw payload arrays, execute mappings/rules, build patch plans, route a flow, perform side effects, or call infrastructure.
 
 ## Install
 
@@ -28,104 +18,159 @@ Compile-first library for selecting a decision from JSON-safe facts.
 npm install @processengine/decisions
 ```
 
+Node.js `>=20.19.0` is required.
+
+## Public API
+
+```js
+const {
+  validateDecisions,
+  prepareDecisions,
+  executeDecisions,
+  formatDecisionsDiagnostics,
+  formatDecisionsRuntimeError,
+  DecisionsCompileError,
+  DecisionsRuntimeError
+} = require('@processengine/decisions');
+```
+
+Canonical lifecycle:
+
+```text
+validateDecisions -> prepareDecisions -> executeDecisions
+```
+
+The old `compile/evaluate/run` API is not canonical in v2.
+
 ## Quick start
 
 ```js
-const { compile, evaluate } = require('@processengine/decisions');
+const { validateDecisions, prepareDecisions, executeDecisions } = require('@processengine/decisions');
 
-const definition = {
-  artifacts: [
+const source = {
+  decisionSetId: 'decisions.validation.route',
+  version: '2.0.0',
+  title: 'Choose validation route',
+  description: 'Selects whether processing can continue after validation.',
+  cases: [
     {
-      id: 'risk.approve',
-      type: 'decision-rule',
-      description: 'approve low-risk request',
-      when: { 'request.risk': 'low' },
-      then: {
-        decision: 'APPROVE',
-        reason: 'low risk'
-      }
-    },
-    {
-      id: 'risk.route',
-      type: 'decision-set',
-      description: 'main routing',
-      version: '1.0.0',
-      mode: 'first_match_wins',
-      rules: ['risk.approve'],
-      defaultDecision: {
-        decision: 'REVIEW',
-        reason: 'fallback'
-      }
+      id: 'validation.has_errors',
+      title: 'Has blocking errors',
+      description: 'Rejects the request when validation produced at least one error.',
+      when: { errorCount: { gt: 0 } },
+      then: { outcome: 'REJECT_VALIDATION', reason: 'VALIDATION_ERROR' }
     }
-  ]
+  ],
+  default: { outcome: 'CONTINUE', reason: 'VALIDATION_OK' }
 };
 
-const compiled = compile(definition);
-const result = evaluate(compiled, 'risk.route', { request: { risk: 'low' } });
+const validation = validateDecisions(source);
+if (!validation.ok) throw new Error(JSON.stringify(validation.diagnostics, null, 2));
+
+const artifact = prepareDecisions(source);
+const result = executeDecisions(artifact, { errorCount: 2 });
+
+console.log(result.output.outcome); // REJECT_VALIDATION
 ```
 
-## Compile-first contract
+## Source artifact
 
-- `compile(definition)` returns an immutable compiled artifact
-- `evaluate(compiled, entrypointId, facts)` works only on a compiled artifact
-- mutating the original definition after `compile()` does not affect evaluation
-- `run(definition, entrypointId, facts)` is only a facade over `compile() + evaluate()`
+```ts
+interface DecisionsDefinitionV2 {
+  decisionSetId: string;
+  version: string;
+  title: string;
+  description: string;
+  cases: DecisionCaseV2[];
+  default: DecisionThen;
+  metadata?: JsonObject;
+}
+```
 
-## Result model
+`cases` must be a non-empty array. The first matching case wins. If no case matches, `default` is selected.
 
-### MATCHED
+## Conditions
 
-A rule matched. The selected decision comes from that rule.
+Short equality form:
 
-### DEFAULTED
+```json
+{ "resultStatus": "SUCCESS" }
+```
 
-No rule matched and strict mode is off. The selected decision comes from `defaultDecision`.
+Operator form:
 
-### ABORT
+```json
+{
+  "errorCount": { "gt": 0 },
+  "warningCount": { "eqFact": "softContactWarningCount" },
+  "clientOriginKind": { "in": ["OWN_SERVICE", "SYSTEM"] },
+  "optionalSignal": { "missing": true }
+}
+```
 
-Evaluation stopped due to invalid input, missing required facts, strict default resolution, or another runtime contract violation.
+Supported operators:
+
+```text
+eq / neq
+gt / gte / lt / lte
+in / notIn
+exists / missing
+eqFact / neqFact
+gtFact / gteFact / ltFact / lteFact
+```
+
+`exists` and `missing` check path presence, not truthiness:
+
+```text
+value null -> exists = true
+value false -> exists = true
+value 0 -> exists = true
+absent fact -> missing = true
+```
+
+## Runtime result
+
+```ts
+interface ExecuteDecisionsResult {
+  output: {
+    outcome: string;
+    reason?: string;
+    matchedCaseId?: string;
+    decisionSetId: string;
+    metadata?: JsonObject;
+    tags?: string[];
+  };
+  trace?: DecisionTraceEvent[];
+}
+```
+
+The result and trace are JSON-safe / transport-safe. `metadata` fields must be JSON-safe plain objects, case ids must be unique, and scalar condition operators reject object/array facts instead of guessing. This means the result can be written by `@processengine/dataflows` into `$.context.data.decisions.*` and then read by Flow 5 `CONTROL/ROUTE` at `.outcome` without host-side cleanup.
 
 ## Trace
 
-Trace is part of the public contract.
+Trace is disabled by default. The only supported values are `'off'`, `'basic'`, and `'verbose'`. Other values are rejected with `DECISIONS_TRACE_MODE_INVALID`.
 
-Each trace item contains:
+```js
+executeDecisions(artifact, facts);                 // trace off by default
+executeDecisions(artifact, facts, { trace: 'off' });
+executeDecisions(artifact, facts, { trace: 'basic' });
+executeDecisions(artifact, facts, { trace: 'verbose' });
+```
 
-- `ruleId`
-- `matched`
-- `failedConditions` when the rule did not match
+`verbose` trace includes JSON-safe input/output snapshots. Invalid execution options are rejected with typed `DecisionsRuntimeError`; no raw JavaScript error is allowed to escape the public runtime boundary.
 
-Failed conditions include:
+## Flow 5 interop
 
-- `fact`
-- `expected`
-- `actual`
-- `conditionIndex`
+Typical dataflow chain:
 
-Trace order always follows rule order.
+```text
+MAPPINGS kind=facts -> DECISIONS -> write $.context.data.decisions.<name>
+CONTROL/ROUTE reads $.context.data.decisions.<name>.outcome
+```
 
-## Missing facts
+## Documentation
 
-There are two levels of missing fact handling.
-
-- `requiredFacts` is checked before rule evaluation and may return `REQUIRED_FACT_MISSING`
-- rule conditions use `missingFactPolicy`
-  - `false`: missing fact behaves like a failed condition
-  - `error`: evaluation aborts with `MISSING_FACT`
-
-## Known limits of v1
-
-- only equality conditions are supported
-- no expression language
-- no nested decisions
-- no side effects
-- no dynamic action execution
-- compile-time overlap analysis is heuristic and intentionally limited
-
-## Schema
-
-The package exports the canonical schema at subpath `@processengine/decisions/schema`.
-
-## CommonJS note
-
-The first release is CommonJS-first. Use `require()` from Node.js or configure your toolchain accordingly.
+- [`docs/SPEC_RU.md`](./docs/SPEC_RU.md) — normative Russian specification.
+- [`docs/MIGRATION_GUIDE.md`](./docs/MIGRATION_GUIDE.md) — migration from v1 equality engine.
+- [`COMPATIBILITY.md`](./COMPATIBILITY.md) — compatibility guarantees.
+- [`CHANGELOG.md`](./CHANGELOG.md) — release notes.
